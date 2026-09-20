@@ -6,10 +6,10 @@ import aiohttp
 
 
 class XRocketClient:
-    """Small read-only REST adapter.
+    """Read-only REST adapter for the real xRocket Exchange API.
 
-    xRocket API paths can change. Keep all provider-specific paths here so the
-    rest of the application remains provider-agnostic.
+    Verified against https://docs.pp.xrocket.exchange/api/exchange/reference
+    on 2026-09-20. Symbols use a hyphen, e.g. "TON-USDT", "BTC-USDT".
     """
 
     def __init__(self, base_url: str):
@@ -24,12 +24,31 @@ class XRocketClient:
                 response.raise_for_status()
                 return await response.json()
 
-    async def ticker(self, symbol: str) -> Any:
-        # Verify current path/parameter names in official xRocket docs.
-        return await self._get("/v1/ticker", {"symbol": symbol})
+    async def ticker_24h(self, symbol: str) -> dict[str, Any] | None:
+        """GET /api/v1/ticker/24h?symbols=SYMBOL
 
-    async def orderbook(self, symbol: str) -> Any:
-        return await self._get("/v1/orderbook", {"symbol": symbol})
+        Returns the single ticker dict for `symbol`, or None if not found.
+        Fields: symbol, open, close, high, low, changeRate, changePrice,
+        baseVolume, quoteVolume, last (all strings).
+        """
+        data = await self._get("/api/v1/ticker/24h", {"symbols": symbol})
+        tickers = data.get("tickers", [])
+        for t in tickers:
+            if t.get("symbol") == symbol:
+                return t
+        return tickers[0] if tickers else None
+
+    async def orderbook(self, symbol: str, depth: int = 5) -> dict[str, Any]:
+        """GET /api/v1/orderbook?symbol=SYMBOL&depth=5
+
+        Returns {"sequence", "bids": [[price, size], ...], "asks": [...],
+        "askTotalAmount", "bidTotalAmount"}. Prices/sizes are strings.
+        """
+        return await self._get(
+            "/api/v1/orderbook", {"symbol": symbol, "depth": depth}
+        )
 
     async def trades(self, symbol: str, limit: int = 50) -> Any:
-        return await self._get("/v1/trades", {"symbol": symbol, "limit": limit})
+        return await self._get(
+            "/api/v1/trades", {"symbol": symbol, "limit": limit}
+        )
