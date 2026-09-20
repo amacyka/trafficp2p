@@ -1,0 +1,43 @@
+databases:
+  - name: liquidity-monitor-db
+    plan: free
+
+services:
+  # Public web dashboard — this is the URL you open in the browser.
+  - type: web
+    name: liquidity-monitor-web
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: sh -c "uvicorn app.web:app --host 0.0.0.0 --port $PORT"
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: liquidity-monitor-db
+          property: connectionString
+      - key: SYMBOL
+        value: TON/USDT
+      - key: XRocket_API_BASE_URL
+        value: https://exchange.api.xrocket.com
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+
+  # Background worker — polls xRocket and runs the Telegram bot.
+  # No public URL; it just needs to keep running.
+  - type: worker
+    name: liquidity-monitor-bot
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: python -m app.main
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: liquidity-monitor-db
+          property: connectionString
+      - key: SYMBOL
+        value: TON/USDT
+      - key: XRocket_API_BASE_URL
+        value: https://exchange.api.xrocket.com
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
