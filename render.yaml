@@ -18,8 +18,8 @@ services:
           name: liquidity-monitor-db
           property: connectionString
       - key: SYMBOL
-        value: TON/USDT
+        value: TON-USDT
       - key: XRocket_API_BASE_URL
-        value: https://exchange.api.xrocket.com
+        value: https://exchange.api.xrocket.exchange
       - key: TELEGRAM_BOT_TOKEN
         sync: false
