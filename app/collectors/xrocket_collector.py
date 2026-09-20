@@ -6,26 +6,30 @@ from datetime import datetime, timezone
 from app.analytics.market import spread_pct
 from app.config import settings
 from app.database.db import SessionLocal
-from app.database.models import MarketSnapshot, Trade
+from app.database.models import MarketSnapshot
 from app.exchanges.xrocket import XRocketClient
 
 
-def _extract_ticker(data: dict) -> tuple[float | None, float | None, float | None, float | None]:
-    # Defensive parser: adapt these keys if the current xRocket response differs.
-    payload = data.get("data", data)
-    if isinstance(payload, list):
-        payload = payload[0] if payload else {}
-    return (
-        payload.get("bid") or payload.get("bestBid"),
-        payload.get("ask") or payload.get("bestAsk"),
-        payload.get("last") or payload.get("lastPrice") or payload.get("price"),
-        payload.get("volume24h") or payload.get("volume_24h") or payload.get("volume24H"),
-    )
+def _to_float(value) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
 
 
 async def collect_once(client: XRocketClient) -> None:
-    ticker = await client.ticker(settings.symbol)
-    bid, ask, last_price, volume_24h = _extract_ticker(ticker)
+    symbol = settings.symbol
+
+    ticker = await client.ticker_24h(symbol)
+    book = await client.orderbook(symbol, depth=5)
+
+    last_price = _to_float(ticker.get("last")) if ticker else None
+    volume_24h = _to_float(ticker.get("baseVolume")) if ticker else None
+
+    bids = book.get("bids") or []
+    asks = book.get("asks") or []
+    bid = _to_float(bids[0][0]) if bids else None
+    ask = _to_float(asks[0][0]) if asks else None
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -34,15 +38,12 @@ async def collect_once(client: XRocketClient) -> None:
             MarketSnapshot(
                 timestamp=now,
                 exchange="xrocket",
-                symbol=settings.symbol,
-                bid=float(bid) if bid is not None else None,
-                ask=float(ask) if ask is not None else None,
-                last_price=float(last_price) if last_price is not None else None,
-                spread_pct=spread_pct(
-                    float(bid) if bid is not None else None,
-                    float(ask) if ask is not None else None,
-                ),
-                volume_24h=float(volume_24h) if volume_24h is not None else None,
+                symbol=symbol,
+                bid=bid,
+                ask=ask,
+                last_price=last_price,
+                spread_pct=spread_pct(bid, ask),
+                volume_24h=volume_24h,
             )
         )
         await session.commit()
