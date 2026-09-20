@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Crypto Liquidity Monitor</title>
+<style>
+  :root {
+    --bg: #0b0e13;
+    --panel: #12161d;
+    --border: #1f2530;
+    --text: #e7ebf0;
+    --muted: #8a93a3;
+    --up: #34d399;
+    --down: #f87171;
+    --accent: #5b8cff;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  body {
+    padding: 16px;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  h1 {
+    font-size: 18px;
+    margin: 0;
+    font-weight: 600;
+  }
+  #symbol {
+    color: var(--muted);
+    font-size: 13px;
+  }
+  .status {
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--muted);
+  }
+  .dot.live { background: var(--up); }
+  .dot.stale { background: #f5b942; }
+  .dot.error { background: var(--down); }
+
+  .price-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 20px;
+    margin-bottom: 12px;
+    text-align: center;
+  }
+  #last-price {
+    font-size: 40px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+  }
+  #spread {
+    margin-top: 6px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+
+  canvas {
+    width: 100%;
+    height: 160px;
+    display: block;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 12px;
+  }
+  .metric {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px 14px;
+  }
+  .metric .label {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .metric .value {
+    font-size: 16px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .updated {
+    text-align: center;
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 14px;
+  }
+
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 40px 20px;
+    font-size: 14px;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>📊 Liquidity Monitor</h1>
+    <div id="symbol">—</div>
+  </div>
+  <div class="status"><span class="dot" id="status-dot"></span><span id="status-text">Подключение…</span></div>
+</header>
+
+<div class="price-card">
+  <div id="last-price">—</div>
+  <div id="spread">спред: —</div>
+  <canvas id="chart" width="640" height="160"></canvas>
+</div>
+
+<div class="grid">
+  <div class="metric">
+    <div class="label">Bid</div>
+    <div class="value" id="bid">—</div>
+  </div>
+  <div class="metric">
+    <div class="label">Ask</div>
+    <div class="value" id="ask">—</div>
+  </div>
+  <div class="metric">
+    <div class="label">Объём 24ч</div>
+    <div class="value" id="volume">—</div>
+  </div>
+  <div class="metric">
+    <div class="label">Биржа</div>
+    <div class="value" id="exchange">—</div>
+  </div>
+</div>
+
+<div class="updated" id="updated">Ожидание первых данных…</div>
+
+<script>
+  const POLL_MS = 5000;
+  const dot = document.getElementById('status-dot');
+  const statusText = document.getElementById('status-text');
+  const el = (id) => document.getElementById(id);
+
+  function fmt(n, digits = 6) {
+    if (n === null || n === undefined) return '—';
+    return Number(n).toLocaleString('ru-RU', { maximumFractionDigits: digits });
+  }
+
+  function setStatus(kind, text) {
+    dot.className = 'dot ' + kind;
+    statusText.textContent = text;
+  }
+
+  let lastPrice = null;
+
+  function renderChart(points) {
+    const canvas = el('chart');
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const prices = points.map(p => p.last_price).filter(p => p !== null && p !== undefined);
+    if (prices.length < 2) return;
+
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const range = (max - min) || 1;
+    const pad = 8;
+
+    ctx.beginPath();
+    prices.forEach((p, i) => {
+      const x = pad + (i / (prices.length - 1)) * (w - pad * 2);
+      const y = h - pad - ((p - min) / range) * (h - pad * 2);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    const up = prices[prices.length - 1] >= prices[0];
+    ctx.strokeStyle = up ? '#34d399' : '#f87171';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  async function loadHistory() {
+    try {
+      const res = await fetch('/api/history?limit=200');
+      const data = await res.json();
+      if (data.points && data.points.length) renderChart(data.points);
+    } catch (e) { /* chart is best-effort */ }
+  }
+
+  async function poll() {
+    try {
+      const res = await fetch('/api/market', { cache: 'no-store' });
+      const data = await res.json();
+
+      if (data.status !== 'ok') {
+        setStatus('stale', 'Нет данных пока');
+        el('updated').textContent = 'Коллектор ещё не сохранил первый снимок рынка.';
+        return;
+      }
+
+      el('symbol').textContent = data.symbol;
+      el('exchange').textContent = data.exchange.toUpperCase();
+      el('bid').textContent = fmt(data.bid);
+      el('ask').textContent = fmt(data.ask);
+      el('volume').textContent = fmt(data.volume_24h, 2);
+      el('spread').textContent = 'спред: ' + (data.spread_pct !== null ? fmt(data.spread_pct, 3) + '%' : '—');
+
+      const priceEl = el('last-price');
+      priceEl.textContent = fmt(data.last_price);
+      if (lastPrice !== null && data.last_price !== null) {
+        priceEl.style.color = data.last_price >= lastPrice ? 'var(--up)' : 'var(--down)';
+      }
+      lastPrice = data.last_price;
+
+      const updatedAt = new Date(data.timestamp);
+      el('updated').textContent = 'Обновлено: ' + updatedAt.toLocaleTimeString('ru-RU');
+
+      setStatus('live', 'Live');
+      loadHistory();
+    } catch (e) {
+      setStatus('error', 'Нет связи с сервером');
+    }
+  }
+
+  poll();
+  setInterval(poll, POLL_MS);
+</script>
+
+</body>
+</html>
